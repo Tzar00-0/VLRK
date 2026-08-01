@@ -1,0 +1,121 @@
+// =============================================================================
+// VLRK - Prisma Database Schema
+// =============================================================================
+// Defines 5 core models: User, Room, Reservation, ApprovalLog, Notification
+// Uses SQLite for easy local development (no external DB server needed)
+// Enum values stored as String since SQLite doesn't support native enums
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Models
+// -----------------------------------------------------------------------------
+// Note: SQLite doesn't support native enums, so we use String fields with
+// validation enforced at the application layer instead.
+// Role values: "SISWA" | "PENDAMPING" | "ADMIN"
+// RoomStatus values: "AKTIF" | "NONAKTIF"
+// ReservationStatus values: "PENDING" | "DISETUJUI" | "DITOLAK" | "DIBATALKAN"
+// Priority values: "NORMAL" | "TINGGI"
+// ApprovalAction values: "SETUJU" | "TOLAK"
+// -----------------------------------------------------------------------------
+
+/// Pengguna sistem — siswa, pendamping, atau admin
+model User {
+  id           Int      @id @default(autoincrement())
+  nama         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         String   @default("SISWA")
+  statusAktif  Boolean  @default(true) @map("status_aktif")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  reservations  Reservation[]
+  approvalLogs  ApprovalLog[]   @relation("AdminApprovals")
+  notifications Notification[]
+
+  @@map("users")
+}
+
+/// Ruang kelas yang bisa direservasi
+model Room {
+  id        Int      @id @default(autoincrement())
+  namaRuang String   @map("nama_ruang")
+  gedung    String
+  lantai    Int
+  kapasitas Int
+  fasilitas String   @default("[]") // JSON array stored as string: ["proyektor", "AC"]
+  fotoUrl   String?  @map("foto_url")
+  status    String   @default("AKTIF")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  reservations Reservation[]
+
+  @@map("rooms")
+}
+
+/// Pengajuan reservasi ruang kelas
+model Reservation {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @map("user_id")
+  roomId        Int      @map("room_id")
+  namaKegiatan  String   @map("nama_kegiatan")
+  tanggal       DateTime
+  jamMulai      String   @map("jam_mulai")   // Format: "HH:mm"
+  jamSelesai    String   @map("jam_selesai")  // Format: "HH:mm"
+  jumlahPeserta Int      @map("jumlah_peserta")
+  keterangan    String?
+  status        String   @default("PENDING")
+  prioritas     String
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user          User          @relation(fields: [userId], references: [id])
+  room          Room          @relation(fields: [roomId], references: [id])
+  approvalLogs  ApprovalLog[]
+  notifications Notification[]
+
+  @@map("reservations")
+}
+
+/// Log setiap aksi approval/penolakan oleh admin (audit trail)
+model ApprovalLog {
+  id            Int      @id @default(autoincrement())
+  reservationId Int      @map("reservation_id")
+  adminId       Int      @map("admin_id")
+  aksi          String   // "SETUJU" | "TOLAK"
+  catatan       String?
+  timestamp     DateTime @default(now())
+
+  // Relations
+  reservation Reservation @relation(fields: [reservationId], references: [id])
+  admin       User        @relation("AdminApprovals", fields: [adminId], references: [id])
+
+  @@map("approval_logs")
+}
+
+/// Notifikasi ke pengguna (email & in-app)
+model Notification {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @map("user_id")
+  reservationId  Int?     @map("reservation_id")
+  tipe           String   // "APPROVAL" | "REJECTION" | "REMINDER"
+  pesan          String
+  statusTerkirim Boolean  @default(false) @map("status_terkirim")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user        User         @relation(fields: [userId], references: [id])
+  reservation Reservation? @relation(fields: [reservationId], references: [id])
+
+  @@map("notifications")
+}
